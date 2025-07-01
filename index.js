@@ -1,94 +1,66 @@
-js
-import makeWASocket, {
-  useSingleFileAuthState,
-  DisconnectReason
-} from '@whiskeysockets/baileys';
-import { Boom} from '@hapi/boom';
-import qrcode from 'qrcode-terminal';
-import fs from 'fs';
-import path from 'path';
-import ytdl from 'ytdl-core';
-import ffmpeg from 'fluent-ffmpeg';
-import yts from 'yt-search';
-import { fileURLToPath} from 'url';
-import { dirname} from 'path';
+const { Client, MessageMedia} = require('whatsapp-web.js');
+const qrcode = require('qrcode-terminal');
+const ytdl = require('ytdl-core');
+const ytSearch = require('yt-search');
+const ffmpeg = require('ffmpeg-static');
+const { exec} = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const { state, saveState} = useSingleFileAuthState('./auth_info.json');
-
-async function startBot() {
-  const sock = makeWASocket({
-    auth: state,
-    printQRInTerminal: true
-});
-
-  sock.ev.on('creds.update', saveState);
-
-  sock.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect} = update;
-    if (connection === 'close') {
-      const shouldReconnect =
-        lastDisconnect?.error?.output?.statusCode!== DisconnectReason.loggedOut;
-
-      console.log('🔁 Connection closed. Reconnecting:', shouldReconnect);
-
-      if (shouldReconnect) {
-        startBot();
-}
-} else if (connection === 'open') {
-      console.log('✅ WhatsApp Bot Connected!');
+// 🟢 WhatsApp client (no session saving)
+const client = new Client({
+  puppeteer: {
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
 }
 });
 
-  sock.ev.on('messages.upsert', async ({ messages}) => {
-    const msg = messages[0];
-    if (!msg.message || msg.key.fromMe) return;
-
-    const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
-    const sender = msg.key.remoteJid;
-
-    if (text === 'hi') {
-      await sock.sendMessage(sender, { text: 'Hello! I am your bot 🤖'});
-}
-
-    if (text?.startsWith('.song ')) {
-      const query = text.replace('.song ', '').trim();
-      let videoUrl = '';
-
-      if (ytdl.validateURL(query)) {
-        videoUrl = query;
-} else {
-        const searchResult = await yts(query);
-        if (!searchResult.videos.length) {
-          await sock.sendMessage(sender, { text: '❌ Song not found on YouTube'});
-          return;
-}
-        videoUrl = searchResult.videos[0].url;
-}
-
-      const info = await ytdl.getInfo(videoUrl);
-      const title = info.videoDetails.title.replace(/[^\w\s]/gi, '');
-      const filePath = path.resolve(__dirname, `${title}.mp3`);
-
-      await sock.sendMessage(sender, { text: `🎵 Downloading: ${title}`});
-
-      const stream = ytdl(videoUrl, { filter: 'audioonly'});
-      ffmpeg(stream)
-.audioBitrate(128)
-.save(filePath)
-.on('end', async () => {
-          const audio = fs.readFileSync(filePath);
-          await sock.sendMessage(sender, {
-            audio: audio,
-            mimetype: 'audio/mp4',
-            ptt: false
+// 📸 Show QR code in terminal
+client.on('qr', (qr) => {
+  console.log('📱 Scan this QR code to connect WhatsApp:');
+  qrcode.generate(qr, { small: true});
 });
-          fs.unlinkSync(filePath);
+
+// ✅ Connected
+client.on('ready', () => {
+  console.log('✅ WhatsApp bot connected!');
 });
-}
-});
+
+// 🎵.song command
+client.on('message', async (message) => {
+  const msg = message.body.toLowerCase();
+
+  if (msg.startsWith('.song ')) {
+    const query = msg.replace('.song ', '');
+    const results = await ytSearch(query + ' sinhala song');
+
+    if (!results.videos.length) {
+      return message.reply('😢 සින්දුවක් හමු නොවුණා.');
 }
 
-startBot();
+    const video = results.videos[0];
+    const title = video.title.replace(/[^\w\s]/gi, '');
+    const url = video.url;
+    const output = `${title}.mp3`;
+    const filePath = path.join(__dirname, output);
+
+    message.reply(`⬇️ "${title}" download වෙමින් පවතී...`);
+
+    const stream = ytdl(url, { filter: 'audioonly'});
+    const ffmpegCmd = `${ffmpeg} -i pipe:0 -vn -acodec libmp3lame -ab 128k "${filePath}"`;
+    const ffmpegProcess = exec(ffmpegCmd);
+
+    stream.pipe(ffmpegProcess.stdin);
+
+    ffmpegProcess.on('close', async () => {
+      try {
+        const media = MessageMedia.fromFilePath(filePath);
+        await message.reply(media, { caption: `🎵 ${title}`});
+        fs.unlinkSync(filePath);
+} catch (err) {
+        console.error('❌ File send error:', err);
+        await message.reply('😓 සින්දුව යවන්න බැරි වුණා.');
+}
+});
+}
+});
+client.initialize();
