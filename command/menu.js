@@ -4,7 +4,7 @@ const moment = require('moment');
 exports.execute = async (sock, msg) => {
     const sender = msg.key.remoteJid;
     const currentTime = moment().format('MMMM Do YYYY, h:mm A');
-    const imageUrl = 'https://yourdomain.com/bot-menu.jpg'; // Replace with your image
+    const imageUrl = 'https://i.ibb.co/G42J5sgg/Whats-App-Image-2025-07-04-at-5-12-04-AM.jpg'; // Replace with your image
 
     try {
         const response = await axios.get(imageUrl, { responseType: 'arraybuffer'});
