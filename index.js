@@ -2,11 +2,10 @@ const { default: makeWASocket, useSingleFileAuthState, DisconnectReason} = requi
 const { Boom} = require('@hapi/boom');
 const fs = require('fs');
 const path = require('path');
-const http = require('http'); // Dummy server for Fly.io
+const http = require('http');
 
-// Use persistent path if running on Fly.io
-const AUTH_PATH = process.env.FLY_APP_NAME? '/app/auth/auth.json': './auth.json';
-const { state, saveState} = useSingleFileAuthState(AUTH_PATH);
+// Use local auth.json for Glitch
+const { state, saveState} = useSingleFileAuthState('./auth.json');
 
 async function startBot() {
     const sock = makeWASocket({
@@ -34,4 +33,23 @@ async function startBot() {
                 await sock.sendMessage(sender, { text: `❌ Unknown command:.${cmd}`});
 }
 }
+});
+
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect} = update;
+        if (connection === 'close') {
+            const shouldReconnect = (lastDisconnect.error = Boom)?.output?.statusCode!== DisconnectReason.loggedOut;
+            if (shouldReconnect) startBot();
+}
+});
+}
+
+startBot();
+
+// ✅ Glitch requires a web server on port 3000
+http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain'});
+    res.end('🤖 WhatsApp Bot is running on Glitch!');
+}).listen(3000, () => {
+    console.log('🌐 HTTP server running on port 3000 (for Glitch)');
 });
